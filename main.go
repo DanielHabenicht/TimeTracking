@@ -48,11 +48,12 @@ var (
 	lastTimeEntryId    string
 	lastUserId         string
 	tagMap             map[string]string
+	logger             *log.Logger
 )
 
 func main() {
 
-	logger := log.New(os.Stdout, "http: ", log.LstdFlags)
+	logger = log.New(os.Stdout, "http: ", log.LstdFlags)
 	logger.Println("Server is starting...")
 	port := os.Getenv("PORT")
 	logger.Println(port)
@@ -198,15 +199,11 @@ func at_work(state *WorkingState) http.Handler {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-
-		fmt.Println(stateParam)
-
-		if stateParam {
-			clock_in("Automated timing", "@Work")
-		} else {
-			clock_out()
-		}
+		logger.Println(stateParam)
 		state.at_work = stateParam
+
+		evaluateState(state)
+
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "Succeeded")
 	})
@@ -220,8 +217,12 @@ func on_laptop(state *WorkingState) http.Handler {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		state.at_work = stateParam
-		clock_in("@Laptop", "")
+
+		logger.Println(stateParam)
+		state.on_laptop = stateParam
+
+		evaluateState(state)
+
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "Succeeded")
 	})
@@ -235,12 +236,49 @@ func on_phone(state *WorkingState) http.Handler {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		logger.Println(stateParam)
+		state.on_phone = stateParam
 
-		state.at_work = stateParam
-		clock_in("@Phone", "")
+		evaluateState(state)
+
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "Succeeded")
 	})
+}
+
+func evaluateState(state *WorkingState) {
+	logger.Println(*state)
+	// type WorkingState struct {at_work, on_laptop, on_phone}
+	switch *state {
+	case WorkingState{false, false, false}:
+		// I am not working so
+		clock_out()
+
+	case WorkingState{true, false, false}:
+		// I am at work
+		clock_in("Normal Work", "@Work")
+
+	case WorkingState{true, true, false}:
+		// I am at work, working on my PC
+		clock_in("Normal Work", "@PC")
+
+	case WorkingState{true, true, true}:
+		// I am at work, working on my PC, taking a call
+		clock_in("Normal Work", "@Phone")
+
+	case WorkingState{false, true, false}:
+		// I am NOT at work, working on my PC
+		clock_in("Remote Work", "@PC")
+
+	case WorkingState{false, true, true}:
+		// I am NOT at work, working on my PC, taking a call
+		clock_in("Remote Work", "@Phone")
+
+	case WorkingState{false, false, true}:
+		// I am NOT at work, NOT ony my PC, taking a call
+		clock_in("Remote Work/Call", "@Phone")
+	}
+
 }
 
 func getParamVal(param string, r *http.Request) (string, error) {
@@ -258,7 +296,7 @@ func checkParamTrue(param string, r *http.Request) (bool, error) {
 }
 
 func clock_in(message string, tag string) {
-
+	logger.Println("Clock in")
 	url := "https://api.clockify.me/api/v1/workspaces/" + clockify_workspace + "/time-entries"
 
 	tagString := ""
@@ -267,82 +305,76 @@ func clock_in(message string, tag string) {
 		tagString = `"` + tagMap[tag] + `"`
 	}
 
-	var jsonStr = []byte(`{
+	var jsonStr = `{
 		"start": "` + time.Now().UTC().Format("2006-01-02T15:04:05.000Z") + `",
 		"billable": "true",
 		"description": "` + message + `",
 		"projectId": "` + clockify_project + `",
 		"tagIds": [` + tagString + `]
-	  }`)
-
-	fmt.Println(string(jsonStr))
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonStr))
-	req.Header.Set("x-api-key", clockify_key)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	fmt.Println("response Status:", resp.Status)
-	body, _ := ioutil.ReadAll(resp.Body)
+	  }`
 
 	var response TimeEntryDto
-	json.Unmarshal([]byte(string(body)), &response)
+	request("POST", url, &response, jsonStr)
+
+	logger.Println(string(jsonStr))
 
 	lastTimeEntryId = response.Id
 	lastUserId = response.UserId
-	fmt.Println("response Body:", string(body))
 }
 
 func clock_out() {
+	logger.Println("Clock out")
+	var jsonStr = `{"end": "` + time.Now().UTC().Format("2006-01-02T15:04:05.000Z") + `"}`
+	logger.Println(string(jsonStr))
+
 	url := "https://api.clockify.me/api/v1/workspaces/" + clockify_workspace + "/user/" + lastUserId + "/time-entries"
+	var body interface{}
+	request("PATCH", url, &body, jsonStr)
 
-	var jsonStr = []byte(`{"end": "` + time.Now().UTC().Format("2006-01-02T15:04:05.000Z") + `"}`)
-
-	fmt.Println(string(jsonStr))
-	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonStr))
-	req.Header.Set("x-api-key", clockify_key)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	fmt.Println("response Status:", resp.Status)
-	body, _ := ioutil.ReadAll(resp.Body)
-	fmt.Println("response Body:", string(body))
+	logger.Println("response Body:", body)
 
 }
 
 func getTags() map[string]string {
-	url := "https://api.clockify.me/api/v1/workspaces/" + clockify_workspace + "/tags"
-
-	req, err := http.NewRequest("GET", url, bytes.NewBuffer([]byte("")))
-	req.Header.Set("x-api-key", clockify_key)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := ioutil.ReadAll(resp.Body)
 	var tags []Tags
-	json.Unmarshal([]byte(string(body)), &tags)
+	request("GET", "https://api.clockify.me/api/v1/workspaces/"+clockify_workspace+"/tags", &tags, "")
 
 	tagMap := make(map[string]string, 15)
-	fmt.Println("Available Tags:")
+	logger.Println("Available Tags:")
 	for _, tag := range tags {
-		fmt.Println(" - " + tag.Name)
+		logger.Println(" - " + tag.Name)
 		tagMap[tag.Name] = tag.Id
 	}
 	return tagMap
+}
+
+func request(method string, url string, resp interface{}, reqBody string) {
+	client := http.Client{
+		Timeout: time.Second * 2,
+	}
+
+	req, err := http.NewRequest(method, url, bytes.NewBuffer([]byte(reqBody)))
+	req.Header.Set("x-api-key", clockify_key)
+	req.Header.Set("Content-Type", "application/json")
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	req.Header.Set("User-Agent", "auto-timetracker")
+
+	res, getErr := client.Do(req)
+	if getErr != nil {
+		log.Fatal(getErr)
+	}
+
+	body, readErr := ioutil.ReadAll(res.Body)
+	if readErr != nil {
+		log.Fatal(readErr)
+	}
+
+	jsonErr := json.Unmarshal(body, &resp)
+	if jsonErr != nil {
+		log.Fatal(jsonErr)
+	}
 }
