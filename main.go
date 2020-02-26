@@ -180,6 +180,10 @@ func tracing(nextRequestID func() string) func(http.Handler) http.Handler {
 func auth(key string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/health" {
+				next.ServeHTTP(w, r)
+				return
+			}
 			keys, ok := r.URL.Query()["auth"]
 
 			if !ok && len(keys) < 1 || keys[0] != key {
