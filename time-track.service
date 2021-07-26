@@ -1,0 +1,17 @@
+[Unit]
+Description=Time Tracking Service
+Requires=docker.service
+After=docker.service
+
+[Service]
+Restart=always
+Type=simple
+RestartSec=1
+# Compose up
+ExecStart=/usr/bin/docker-compose -f /root/TimeTracking/docker-compose.yml up
+
+# Compose down, remove containers and volumes
+ExecStop=/usr/bin/docker-compose -f /root/TimeTracking/docker-compose.yml down
+
+[Install]
+WantedBy=multi-user.target
