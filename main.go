@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"sync/atomic"
 	"time"
+    "strconv"
 )
 
 type key int
@@ -82,6 +83,7 @@ func main() {
 	router.Handle("/on_phone", on_phone(&state))
 	router.Handle("/on_laptop", on_laptop(&state))
 	router.Handle("/at_work", at_work(&state))
+	router.Handle("/status", status(&state))
 
 	nextRequestID := func() string {
 		return fmt.Sprintf("%d", time.Now().UnixNano())
@@ -247,6 +249,17 @@ func on_phone(state *WorkingState) http.Handler {
 
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "Succeeded")
+	})
+}
+
+func status(state *WorkingState) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var jsonStr = `{
+			"on_phone": "` + strconv.FormatBool(state.on_phone) + `",
+			"on_laptop": "` + strconv.FormatBool(state.on_laptop) + `",
+			"at_work": "` + strconv.FormatBool(state.at_work) + `"
+		  }`
+		fmt.Fprintln(w, jsonStr)
 	})
 }
 

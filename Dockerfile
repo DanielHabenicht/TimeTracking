@@ -1,7 +1,7 @@
 # Dockerfile References: https://docs.docker.com/engine/reference/builder/
 
 # Start from the latest golang base image
-FROM golang:latest as builder
+FROM golang:latest@sha256:209b52aac4615efb6e32f0b0863b7d8d44df3ae2a33db73cb80ffc100288f240 as builder
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
